@@ -53,5 +53,5 @@ This sets the version, builds the app, signs it with your Developer ID certifica
 One-off setup on the Mac you release from:
 
 1. **Developer ID certificate:** Xcode → Settings → Accounts → your team → Manage Certificates → + → Developer ID Application.
-2. **Notary credentials:** create an app-specific password at [account.apple.com](https://account.apple.com) (Sign-In and Security → App-Specific Passwords), then run `xcrun notarytool store-credentials Cores-notary --team-id BAZ32PFTJS` and enter your Apple ID and that password when asked. They're kept in your keychain.
+2. **Notary credentials:** create an app-specific password at [account.apple.com](https://account.apple.com) (Sign-In and Security → App-Specific Passwords), then run `xcrun notarytool store-credentials Cores-notary --team-id 47K9K6PP7R` and enter your Apple ID and that password when asked. They're kept in your keychain.
 3. **GitHub CLI:** `gh auth login` (installed at `~/.local/bin/gh` on the original Mac).
