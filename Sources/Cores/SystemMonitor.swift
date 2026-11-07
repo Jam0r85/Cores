@@ -6,7 +6,7 @@ import os
 ///
 /// While the panel is open it samples every second and reads everything. While it's closed
 /// only the menu bar readout is visible, so it samples every 3 seconds at background priority,
-/// skips the readings only the panel shows (fans, GPU memory, SSD, battery), and doesn't touch the
+/// skips the readings only the panel shows (fans, memory, SSD, battery), and doesn't touch the
 /// panel's views at all. The menu bar is only redrawn when what it shows actually changes.
 @MainActor @Observable
 final class SystemMonitor {
@@ -33,7 +33,7 @@ final class SystemMonitor {
         var cpuTempHistory: [Sample] = []
         var gpuTempHistory: [Sample] = []
         var thermalState: ProcessInfo.ThermalState = .nominal
-        var gpuMemory: GPUMemoryReading?
+        var memory: MemoryReading?
     }
 
     /// Exactly what the menu bar readout draws, rounded the way it's displayed, so two
@@ -161,7 +161,7 @@ final class SystemMonitor {
             data.sensors.battery = hid.battery
         }
         if data.sensors.cpu == nil { data.sensors.cpu = data.sensors.soc } // no SMC: fall back to the SoC die sensors
-        if let gpuMemory = reading.gpuMemory { data.gpuMemory = gpuMemory }
+        if let memory = reading.memory { data.memory = memory }
 
         if let cpu = data.sensors.cpu { Self.append(cpu.average, at: reading.time, to: &data.cpuTempHistory) }
         if let gpu = data.sensors.gpu { Self.append(gpu.average, at: reading.time, to: &data.gpuTempHistory) }
@@ -191,13 +191,13 @@ private final class Sampler: @unchecked Sendable {
         var gpu: TempReading?
         var fans: [FanReading]?
         var hid: (soc: TempReading?, ssd: TempReading?, battery: TempReading?)?
-        var gpuMemory: GPUMemoryReading?
+        var memory: MemoryReading?
     }
 
     let queue = DispatchQueue(label: "Cores.sampler") // priority is set per read, see SystemMonitor.tick()
     let cpu = CPUSampler()
     private let sensors = SensorSampler()
-    private let gpuMemory = GPUMemorySampler()
+    private let memory = MemorySampler()
     private var lastHIDRead = Date.distantPast
 
     /// `detail` adds the readings only the open panel shows.
@@ -207,7 +207,7 @@ private final class Sampler: @unchecked Sendable {
         var reading = Reading(time: now, loads: cpu.sample(), cpu: temps.cpu, gpu: temps.gpu)
         if detail {
             reading.fans = sensors.sampleFans()
-            reading.gpuMemory = gpuMemory.sample()
+            reading.memory = memory.sample()
         }
         // SSD and battery change slowly: every 5 s while open.
         // Without SMC CPU sensors they stand in for CPU temperature, so then they're read every time.

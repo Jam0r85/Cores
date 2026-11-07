@@ -24,8 +24,11 @@ enum Tools {
         for fan in s.fans {
             print("  Fan \(fan.id + 1): \(Int(fan.rpm)) rpm" + (fan.maxRPM.map { " (max \(Int($0)))" } ?? ""))
         }
-        if let memory = monitor.panel.gpuMemory {
-            print("  GPU memory: \(GPUMemoryView.gigabytes(memory.inUse)) in use, \(GPUMemoryView.gigabytes(memory.allocated)) allocated, max \(memory.limit.map(GPUMemoryView.gigabytes) ?? "?")")
+        if let memory = monitor.panel.memory {
+            print("  Memory: \(MemoryView.gigabytes(memory.used)) of \(MemoryView.wholeGigabytes(memory.total)) used")
+            if let gpu = memory.gpu {
+                print("  GPU share: \(MemoryView.gigabytes(gpu.inUse)) in use, \(MemoryView.gigabytes(gpu.allocated)) allocated, max \(gpu.limit.map(MemoryView.gigabytes) ?? "?")")
+            }
         }
         print("  Thermal state: \(monitor.panel.thermalState.rawValue)")
 

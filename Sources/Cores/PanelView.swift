@@ -47,7 +47,7 @@ struct PanelView: View {
             HeaderView(monitor: monitor)
             StatsRow(monitor: monitor)
             CoreBarsView(clusters: monitor.panel.clusters, width: Self.width - Self.padding * 2)
-            GPUMemoryView(memory: monitor.panel.gpuMemory)
+            MemoryView(memory: monitor.panel.memory)
             HStack(spacing: 10) {
                 HistoryCard(title: "Load", series: [.init(name: "CPU", samples: monitor.panel.loadHistory, color: .accentColor)],
                             domain: 0...100, filled: true)
@@ -275,22 +275,23 @@ private struct CoreBar: View {
     }
 }
 
-// MARK: - GPU memory
+// MARK: - Memory
 
-/// Apple Silicon has no separate VRAM, so this shows the GPU's share of the unified memory:
-/// a solid bar for what it's using, a lighter bar for what it's holding, out of what it's allowed.
-struct GPUMemoryView: View {
-    let memory: GPUMemoryReading?
+/// Unified memory: one pool shared by the CPU and GPU. The bar is total memory in use out of the
+/// Mac's RAM, with the GPU's share drawn in purple from the left (solid for what it's actively
+/// using, lighter for what it has set aside).
+struct MemoryView: View {
+    let memory: MemoryReading?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline) {
-                Text("GPU MEMORY")
+                Text("MEMORY")
                     .font(.system(size: 10, weight: .semibold))
                     .kerning(0.6)
                     .foregroundStyle(.secondary)
                 Spacer()
-                Text(memory.map { "\(Self.gigabytes($0.inUse)) in use" } ?? "–")
+                Text(memory.map { "\(Self.gigabytes($0.used)) of \(Self.wholeGigabytes($0.total)) used" } ?? "–")
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(.secondary)
             }
@@ -298,27 +299,36 @@ struct GPUMemoryView: View {
                 ZStack(alignment: .leading) {
                     RoundedRectangle(cornerRadius: 3, style: .continuous)
                         .fill(.primary.opacity(0.07))
-                    bar(for: memory?.allocated, width: geo.size.width)
-                        .fill(Color.purple.opacity(0.3))
-                    bar(for: memory?.inUse, width: geo.size.width)
+                    bar(for: memory?.used, width: geo.size.width)
+                        .fill(Color.accentColor.opacity(0.45))
+                    bar(for: memory?.gpu.map { min($0.allocated, memory?.used ?? 0) }, width: geo.size.width)
+                        .fill(Color.purple.opacity(0.45))
+                    bar(for: memory?.gpu?.inUse, width: geo.size.width)
                         .fill(Color.purple.gradient)
                 }
             }
             .frame(height: 6)
-            HStack {
-                Text(memory.map { "\(Self.gigabytes($0.allocated)) allocated" } ?? "–")
-                Spacer()
-                Text(memory?.limit.map { "\(Self.gigabytes($0)) max" } ?? "–")
+            HStack(spacing: 5) {
+                Circle().fill(Color.purple).frame(width: 5, height: 5)
+                Text(memory?.gpu.map { "GPU \(Self.gigabytes($0.inUse)) in use · \(Self.gigabytes($0.allocated)) allocated" } ?? "GPU –")
             }
             .font(.system(size: 10))
             .foregroundStyle(.tertiary)
         }
         .monospacedDigit()
-        .help("The GPU shares the Mac's memory. In use: what it's actively using. Allocated: what it's holding, including caches it can give back. Max: the most macOS lets it use.")
+        .help(helpText)
+    }
+
+    private var helpText: String {
+        var text = "Apple silicon has one pool of memory shared by the CPU and GPU. The bar shows how much is in use "
+            + "(counted like Activity Monitor's Memory Used), with the GPU's share in purple: solid for what it's "
+            + "actively using, lighter for what it has set aside."
+        if let limit = memory?.gpu?.limit { text += " The GPU can use up to \(Self.gigabytes(limit))." }
+        return text
     }
 
     private func bar(for bytes: UInt64?, width: CGFloat) -> some Shape {
-        let total = Double(memory?.limit ?? memory?.allocated ?? 0)
+        let total = Double(memory?.total ?? 0)
         let fraction = total > 0 ? min(Double(bytes ?? 0) / total, 1) : 0
         let length = fraction > 0 ? max(4, width * fraction) : 0
         return RoundedRectangle(cornerRadius: 3, style: .continuous).size(width: length, height: 6)
@@ -326,6 +336,10 @@ struct GPUMemoryView: View {
 
     static func gigabytes(_ bytes: UInt64) -> String {
         String(format: "%.1f GB", Double(bytes) / 1_073_741_824)
+    }
+
+    static func wholeGigabytes(_ bytes: UInt64) -> String {
+        "\(Int((Double(bytes) / 1_073_741_824).rounded())) GB"
     }
 }
 
