@@ -1,5 +1,4 @@
 import Charts
-import ServiceManagement
 import SwiftUI
 
 /// The dropdown shown when the menu bar item is clicked.
@@ -7,12 +6,43 @@ import SwiftUI
 /// when content gets shorter, which left blank space around a collapsed section.
 struct PanelView: View {
     let monitor: SystemMonitor
+    let updater: Updater
     var tracksVisibility = true // off for snapshots, which can't draw the AppKit view that does it
+    @State private var showingSettings: Bool
 
     static let width: CGFloat = 320
     static let padding: CGFloat = 16
 
+    init(monitor: SystemMonitor, updater: Updater, tracksVisibility: Bool = true, startInSettings: Bool = false) {
+        self.monitor = monitor
+        self.updater = updater
+        self.tracksVisibility = tracksVisibility
+        _showingSettings = State(initialValue: startInSettings)
+    }
+
     var body: some View {
+        // Settings are laid over the (hidden) stats so the dropdown never changes size.
+        ZStack(alignment: .top) {
+            stats
+                .opacity(showingSettings ? 0 : 1)
+                .allowsHitTesting(!showingSettings)
+                .accessibilityHidden(showingSettings)
+            if showingSettings {
+                SettingsView(updater: updater) { withAnimation(.easeOut(duration: 0.15)) { showingSettings = false } }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    .transition(.opacity)
+            }
+        }
+        .padding(Self.padding)
+        .frame(width: Self.width)
+        .fixedSize(horizontal: false, vertical: true)
+        .background {
+            if tracksVisibility { PanelVisibilityReader { monitor.setPanelVisible($0) } }
+        }
+        .onChange(of: monitor.panelOpens) { showingSettings = false } // each open starts on the stats
+    }
+
+    private var stats: some View {
         VStack(alignment: .leading, spacing: 18) {
             HeaderView(monitor: monitor)
             StatsRow(monitor: monitor)
@@ -27,13 +57,9 @@ struct PanelView: View {
                 ], domain: nil, filled: false)
             }
             SensorsSection(sensors: monitor.panel.sensors)
-            FooterView()
-        }
-        .padding(Self.padding)
-        .frame(width: Self.width)
-        .fixedSize(horizontal: false, vertical: true)
-        .background {
-            if tracksVisibility { PanelVisibilityReader { monitor.setPanelVisible($0) } }
+            FooterView(showsBadge: updater.needsAttention) {
+                withAnimation(.easeOut(duration: 0.15)) { showingSettings = true }
+            }
         }
     }
 }
@@ -446,17 +472,20 @@ private struct SensorRow: View {
 // MARK: - Footer
 
 private struct FooterView: View {
-    @State private var openAtLogin = SMAppService.mainApp.status == .enabled
+    let showsBadge: Bool
+    let openSettings: () -> Void
 
     var body: some View {
         HStack {
-            Button {
-                toggleOpenAtLogin()
-            } label: {
+            Button(action: openSettings) {
                 HStack(spacing: 5) {
-                    Image(systemName: openAtLogin ? "checkmark.circle.fill" : "circle")
-                        .foregroundStyle(openAtLogin ? Color.accentColor : Color.secondary)
-                    Text("Open at login")
+                    Image(systemName: "gearshape")
+                        .overlay(alignment: .topTrailing) {
+                            if showsBadge {
+                                Circle().fill(Color.accentColor).frame(width: 6, height: 6).offset(x: 2, y: -2)
+                            }
+                        }
+                    Text("Settings")
                 }
             }
             Spacer()
@@ -468,23 +497,10 @@ private struct FooterView: View {
         .buttonStyle(QuietButtonStyle())
         .padding(.top, 2)
     }
-
-    private func toggleOpenAtLogin() {
-        do {
-            if openAtLogin {
-                try SMAppService.mainApp.unregister()
-            } else {
-                try SMAppService.mainApp.register()
-            }
-        } catch {
-            NSLog("Cores: couldn't change login item: \(error.localizedDescription)")
-        }
-        openAtLogin = SMAppService.mainApp.status == .enabled
-    }
 }
 
 /// Text-only button that brightens on hover. Pure SwiftUI so snapshots render it too.
-private struct QuietButtonStyle: ButtonStyle {
+struct QuietButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         QuietButton(configuration: configuration)
     }

@@ -65,6 +65,10 @@ final class SystemMonitor {
     /// What the menu bar shows. Only updated when the drawing would change.
     private(set) var menuBar: MenuBarState
 
+    /// Counts dropdown opens, so the panel can reset to the stats each time.
+    private(set) var panelOpens = 0
+    /// Lets the updater know when the dropdown opens and closes.
+    @ObservationIgnored var onPanelVisibilityChange: (@MainActor (Bool) -> Void)?
     @ObservationIgnored private(set) var panelVisible = false
     @ObservationIgnored private(set) var interval: TimeInterval = 0
     @ObservationIgnored private var latest: PanelData // always current, whether or not the panel is open
@@ -95,7 +99,9 @@ final class SystemMonitor {
         panelVisible = visible
         // .notice rather than .info: macOS only keeps info messages in memory, so they never reach `log show`.
         log.notice("Panel \(visible ? "opened" : "closed", privacy: .public), sampling every \(Int(visible ? Self.openInterval : Self.closedInterval))s")
+        onPanelVisibilityChange?(visible)
         if visible {
+            panelOpens += 1
             panel = latest // catch the panel up on everything collected while it was closed
             tick()         // and refresh straight away rather than showing a reading up to 3 s old
         }

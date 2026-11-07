@@ -1,21 +1,29 @@
 #!/bin/zsh
-# Builds a signed, notarized Cores.dmg and publishes it as a GitHub release.
+# Builds a signed, notarized release and publishes it on GitHub.
 #
-#   ./release.sh 1.0
+#   ./release.sh 1.1 "What's new in this version."
 #
-# One-off setup (see README → Releasing):
-#   - a "Developer ID Application" certificate in your keychain (Xcode → Settings → Accounts → Manage Certificates)
-#   - notary credentials saved under the profile name below: xcrun notarytool store-credentials Cores-notary
-#   - gh signed in: gh auth login
+# Uploads Cores.dmg (for people downloading it) and Cores.zip (what the app's built-in updater
+# installs). Commit your changes first.
+#
+# One-off setup on the Mac you release from:
+#   - The "Developer ID Application: Steve Morris & Son LLP (BAZ32PFTJS)" certificate and its private
+#     key in your keychain. It can only be created by the team's Account Holder; export it from
+#     Keychain Access as a .p12 to release from another Mac.
+#   - Notary credentials (Apple ID plus an app-specific password from account.apple.com):
+#       xcrun notarytool store-credentials Cores-notary --team-id BAZ32PFTJS
+#   - The GitHub CLI, signed in: gh auth login
 set -euo pipefail
 cd "${0:A:h}"
 
-VERSION="${1:?Usage: ./release.sh <version>, e.g. ./release.sh 1.0}"
+VERSION="${1:?Usage: ./release.sh <version> [notes], e.g. ./release.sh 1.1 \"Adds automatic updates.\"}"
+NOTES="${2:-}"
 TAG="v$VERSION"
 PROFILE="${NOTARY_PROFILE:-Cores-notary}"
 GH="$(command -v gh || echo "$HOME/.local/bin/gh")"
 APP=build/Cores.app
-DMG=build/Cores.dmg # same name every release, so the README's "latest" download link keeps working
+DMG=build/Cores.dmg # same names every release: the README's download link and the updater rely on them
+ZIP=build/Cores.zip
 
 step() { print -P "\n%B==> $1%b" }
 
@@ -57,9 +65,11 @@ CODESIGN_IDENTITY="$IDENTITY" ./build.sh
 codesign --verify --strict --verbose=1 "$APP"
 
 step "Notarizing the app (usually a minute or two)"
-ditto -c -k --keepParent "$APP" build/Cores.zip
-notarize build/Cores.zip
+ditto -c -k --keepParent "$APP" "$ZIP"
+notarize "$ZIP"
 xcrun stapler staple "$APP" # attach the ticket so it opens even when the Mac is offline
+rm -f "$ZIP"
+ditto -c -k --keepParent "$APP" "$ZIP" # re-zip with the ticket attached: this is what the updater downloads
 
 # MARK: - Disk image
 
@@ -82,8 +92,10 @@ spctl --assess --type open --context context:primary-signature --verbose=2 "$DMG
 step "Publishing $TAG on GitHub"
 git tag -a "$TAG" -m "Cores $VERSION"
 git push -q origin HEAD "$TAG"
-"$GH" release create "$TAG" "$DMG" --title "Cores $VERSION" --notes "Open **Cores.dmg** and drag Cores into Applications.
+"$GH" release create "$TAG" "$DMG" "$ZIP" --title "Cores $VERSION" --notes "${NOTES:+$NOTES
 
-Needs an Apple Silicon Mac with macOS 14 or later. Signed with a Developer ID and notarized by Apple, so it opens without a security warning."
+}Download **Cores.dmg**, open it and drag Cores into Applications. If you already have Cores, it updates itself.
+
+Needs an Apple Silicon Mac with macOS 14 or later."
 
 step "Done: $("$GH" release view "$TAG" --json url --jq .url)"

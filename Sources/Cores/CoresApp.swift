@@ -20,11 +20,20 @@ enum Entry {
 }
 
 struct CoresApp: App {
-    @State private var monitor = SystemMonitor()
+    @State private var monitor: SystemMonitor
+    @State private var updater: Updater
+
+    init() {
+        let monitor = SystemMonitor()
+        let updater = Updater()
+        monitor.onPanelVisibilityChange = { updater.panelVisibilityChanged($0) }
+        _monitor = State(initialValue: monitor)
+        _updater = State(initialValue: updater)
+    }
 
     var body: some Scene {
         MenuBarExtra {
-            PanelView(monitor: monitor)
+            PanelView(monitor: monitor, updater: updater)
         } label: {
             MenuBarLabel(monitor: monitor)
         }

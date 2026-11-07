@@ -48,7 +48,7 @@ enum Tools {
         NSApplication.shared.setActivationPolicy(.accessory)
 
         let monitor = SystemMonitor()
-        let host = NSHostingController(rootView: PanelView(monitor: monitor))
+        let host = NSHostingController(rootView: PanelView(monitor: monitor, updater: Updater(startChecking: false)))
         host.sizingOptions = .preferredContentSize
         let window = NSPanel(contentViewController: host)
         window.styleMask = [.borderless, .nonactivatingPanel]
@@ -116,12 +116,16 @@ enum Tools {
         let url = URL(fileURLWithPath: directory)
         try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
 
+        let updater = Updater(startChecking: false)
         for scheme in [ColorScheme.light, .dark] {
             let background = scheme == .dark ? Color(white: 0.16) : Color(white: 0.96)
-            let panel = PanelView(monitor: monitor, tracksVisibility: false)
-                .background(background)
-                .environment(\.colorScheme, scheme)
-            write(panel, scale: 2, to: url.appendingPathComponent("panel-\(scheme == .dark ? "dark" : "light").png"))
+            let name = scheme == .dark ? "dark" : "light"
+            for settings in [false, true] {
+                let panel = PanelView(monitor: monitor, updater: updater, tracksVisibility: false, startInSettings: settings)
+                    .background(background)
+                    .environment(\.colorScheme, scheme)
+                write(panel, scale: 2, to: url.appendingPathComponent("\(settings ? "settings" : "panel")-\(name).png"))
+            }
         }
         let state = monitor.menuBar
         let readout = MenuBarReadout(tiers: state.tierFractions, load: state.load, temp: state.temp)
