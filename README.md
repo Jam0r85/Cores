@@ -15,7 +15,6 @@ Cores shows your CPU load and temperature in the menu bar, or just one of them i
 - **CPU and GPU temperature**, with the last minute of history
 - **Memory**: how much of your unified memory is in use, and the GPU's share of it
 - **SSD and battery temperature** and **fan speeds**
-- **Thermal status**: whether macOS considers your Mac warm or hot
 
 It uses almost no CPU itself and keeps itself up to date.
 
