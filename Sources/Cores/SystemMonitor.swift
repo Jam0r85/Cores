@@ -32,23 +32,50 @@ final class SystemMonitor {
         var sensors = SensorSnapshot()
         var cpuTempHistory: [Sample] = []
         var gpuTempHistory: [Sample] = []
-        var thermalState: ProcessInfo.ThermalState = .nominal
         var memory: MemoryReading?
+    }
+
+    /// Which readings the menu bar shows, chosen in Settings and saved between launches.
+    /// At least one is always on, so the menu bar item can't disappear.
+    struct MenuBarItems: Equatable {
+        var usage = true       // the core bars and total load
+        var temperature = true // CPU temperature
+
+        var isValid: Bool { usage || temperature }
+
+        private static let usageKey = "menuBarShowsUsage"
+        private static let temperatureKey = "menuBarShowsTemperature"
+
+        static func load() -> MenuBarItems {
+            let defaults = UserDefaults.standard
+            defaults.register(defaults: [usageKey: true, temperatureKey: true])
+            let items = MenuBarItems(usage: defaults.bool(forKey: usageKey), temperature: defaults.bool(forKey: temperatureKey))
+            return items.isValid ? items : MenuBarItems()
+        }
+
+        func save() {
+            UserDefaults.standard.set(usage, forKey: Self.usageKey)
+            UserDefaults.standard.set(temperature, forKey: Self.temperatureKey)
+        }
     }
 
     /// Exactly what the menu bar readout draws, rounded the way it's displayed, so two
     /// readings that would look identical compare equal and don't trigger a redraw.
+    /// Readings the menu bar isn't showing are left out for the same reason (the core bars only
+    /// show alongside both numbers).
     struct MenuBarState: Equatable {
         /// The mini bars are 13 pt tall: 26 pixels on a Retina display.
         static let barSteps = 26
+        var items: MenuBarItems
         var tierLevels: [Int]
         var load: Int
         var temp: Int?
 
-        init(_ data: PanelData) {
-            tierLevels = data.clusters.map { Int(($0.average * Double(Self.barSteps)).rounded()) }
-            load = Int((data.totalLoad * 100).rounded())
-            temp = data.sensors.cpu.map { Int($0.average.rounded()) }
+        init(_ data: PanelData, items: MenuBarItems) {
+            self.items = items
+            tierLevels = items.usage && items.temperature ? data.clusters.map { Int(($0.average * Double(Self.barSteps)).rounded()) } : []
+            load = items.usage ? Int((data.totalLoad * 100).rounded()) : 0
+            temp = items.temperature ? data.sensors.cpu.map { Int($0.average.rounded()) } : nil
         }
 
         var tierFractions: [Double] { tierLevels.map { Double($0) / Double(Self.barSteps) } }
@@ -64,6 +91,8 @@ final class SystemMonitor {
     private(set) var panel: PanelData
     /// What the menu bar shows. Only updated when the drawing would change.
     private(set) var menuBar: MenuBarState
+    /// Which readings the menu bar shows. Change it with `setMenuBarItems(_:)`.
+    private(set) var menuBarItems: MenuBarItems
 
     /// Counts dropdown opens, so the panel can reset to the stats each time.
     private(set) var panelOpens = 0
@@ -87,7 +116,9 @@ final class SystemMonitor {
         })
         latest = empty
         panel = empty
-        menuBar = MenuBarState(empty)
+        let items = MenuBarItems.load()
+        menuBarItems = items
+        menuBar = MenuBarState(empty, items: items)
         tickNow()      // full read up front so the panel's first open isn't missing anything
         panel = latest // and give the panel its full layout before it's ever shown, so it never changes height
         scheduleTimer()
@@ -106,6 +137,19 @@ final class SystemMonitor {
             tick()         // and refresh straight away rather than showing a reading up to 3 s old
         }
         scheduleTimer()
+    }
+
+    /// Saves the choice and redraws the menu bar straight away. Turning everything off is ignored.
+    func setMenuBarItems(_ items: MenuBarItems) {
+        guard items.isValid, items != menuBarItems else { return }
+        menuBarItems = items
+        items.save()
+        updateMenuBar()
+    }
+
+    private func updateMenuBar() {
+        let menuBar = MenuBarState(latest, items: menuBarItems)
+        if menuBar != self.menuBar { self.menuBar = menuBar }
     }
 
     private func scheduleTimer() {
@@ -165,12 +209,10 @@ final class SystemMonitor {
 
         if let cpu = data.sensors.cpu { Self.append(cpu.average, at: reading.time, to: &data.cpuTempHistory) }
         if let gpu = data.sensors.gpu { Self.append(gpu.average, at: reading.time, to: &data.gpuTempHistory) }
-        data.thermalState = ProcessInfo.processInfo.thermalState
         latest = data
 
         if panelVisible || !autoTick { panel = data } // the command-line tools always want it
-        let menuBar = MenuBarState(data)
-        if menuBar != self.menuBar { self.menuBar = menuBar }
+        updateMenuBar()
     }
 
     private static func append(_ value: Double, at time: Date, to history: inout [Sample]) {

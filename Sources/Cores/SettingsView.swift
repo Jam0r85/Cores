@@ -3,6 +3,7 @@ import SwiftUI
 
 /// Settings, shown in place of the stats inside the dropdown (the dropdown keeps its size).
 struct SettingsView: View {
+    let monitor: SystemMonitor
     let updater: Updater
     let close: () -> Void
     @State private var openAtLogin = SMAppService.mainApp.status == .enabled
@@ -23,6 +24,15 @@ struct SettingsView: View {
 
             SettingsSection("General") {
                 SwitchRow(title: "Open at login", isOn: Binding(get: { openAtLogin }, set: setOpenAtLogin))
+            }
+
+            SettingsSection("Menu bar") {
+                // The last one left on can't be turned off, or Cores would vanish from the menu bar.
+                let items = monitor.menuBarItems
+                SwitchRow(title: "Core usage", isOn: menuBarItem(\.usage))
+                    .disabled(items.usage && !items.temperature)
+                SwitchRow(title: "CPU temperature", isOn: menuBarItem(\.temperature))
+                    .disabled(items.temperature && !items.usage)
             }
 
             SettingsSection("Updates") {
@@ -78,6 +88,14 @@ struct SettingsView: View {
         }
     }
 
+    private func menuBarItem(_ item: WritableKeyPath<SystemMonitor.MenuBarItems, Bool>) -> Binding<Bool> {
+        Binding(get: { monitor.menuBarItems[keyPath: item] }, set: { on in
+            var items = monitor.menuBarItems
+            items[keyPath: item] = on
+            monitor.setMenuBarItems(items)
+        })
+    }
+
     private func setOpenAtLogin(_ on: Bool) {
         do {
             if on {
@@ -120,6 +138,7 @@ private struct SettingsSection<Content: View>: View {
 private struct SwitchRow: View {
     let title: String
     @Binding var isOn: Bool
+    @Environment(\.isEnabled) private var isEnabled
 
     var body: some View {
         Button {
@@ -138,6 +157,7 @@ private struct SwitchRow: View {
                         .padding(2)
                 }
                 .frame(width: 30, height: 18)
+                .opacity(isEnabled ? 1 : 0.45)
                 .animation(.snappy(duration: 0.2), value: isOn)
             }
             .contentShape(Rectangle())

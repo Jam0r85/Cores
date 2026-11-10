@@ -30,7 +30,7 @@ enum Tools {
                 print("  GPU share: \(MemoryView.gigabytes(gpu.inUse)) in use, \(MemoryView.gigabytes(gpu.allocated)) allocated, max \(gpu.limit.map(MemoryView.gigabytes) ?? "?")")
             }
         }
-        print("  Thermal state: \(monitor.panel.thermalState.rawValue)")
+        print("  Thermal state: \(ProcessInfo.processInfo.thermalState.rawValue)")
 
         let sensors = SensorSampler()
         let cpu = CPUSampler()
@@ -130,9 +130,20 @@ enum Tools {
                 write(panel, scale: 2, to: url.appendingPathComponent("\(settings ? "settings" : "panel")-\(name).png"))
             }
         }
-        let state = monitor.menuBar
-        let readout = MenuBarReadout(tiers: state.tierFractions, load: state.load, temp: state.temp)
-        write(readout.padding(4).background(Color.white), scale: 4, to: url.appendingPathComponent("menubar.png"))
+        let variants: [(String, SystemMonitor.MenuBarItems)] = [
+            ("menubar", .init()),
+            ("menubar-usage", .init(usage: true, temperature: false)),
+            ("menubar-temp", .init(usage: false, temperature: true)),
+        ]
+        for (name, items) in variants {
+            let state = SystemMonitor.MenuBarState(monitor.panel, items: items)
+            // And at the widest it gets, to check nothing is cut off.
+            let widest = MenuBarReadout(tiers: state.tierFractions.map { _ in 1 }, load: 100, temp: 100,
+                                        showsUsage: items.usage, showsTemp: items.temperature)
+            for (suffix, readout) in [("", MenuBarReadout(state)), ("-widest", widest)] {
+                write(readout.padding(4).background(Color.white), scale: 4, to: url.appendingPathComponent("\(name)\(suffix).png"))
+            }
+        }
         print("Wrote snapshots to \(url.path)")
     }
 

@@ -28,7 +28,7 @@ struct PanelView: View {
                 .allowsHitTesting(!showingSettings)
                 .accessibilityHidden(showingSettings)
             if showingSettings {
-                SettingsView(updater: updater) { withAnimation(.easeOut(duration: 0.15)) { showingSettings = false } }
+                SettingsView(monitor: monitor, updater: updater) { withAnimation(.easeOut(duration: 0.15)) { showingSettings = false } }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                     .transition(.opacity)
             }
@@ -127,44 +127,6 @@ private struct HeaderView: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            ThermalPill(state: monitor.panel.thermalState)
-        }
-    }
-}
-
-private struct ThermalPill: View {
-    let state: ProcessInfo.ThermalState
-
-    var body: some View {
-        HStack(spacing: 5) {
-            Circle().fill(color).frame(width: 6, height: 6)
-            Text(label)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.secondary)
-        }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .background(Capsule().fill(.primary.opacity(0.06)))
-        .help("macOS thermal state")
-    }
-
-    private var label: String {
-        switch state {
-        case .nominal: "Normal"
-        case .fair: "Warm"
-        case .serious: "Hot"
-        case .critical: "Critical"
-        @unknown default: "Unknown"
-        }
-    }
-
-    private var color: Color {
-        switch state {
-        case .nominal: .green
-        case .fair: .yellow
-        case .serious: .orange
-        case .critical: .red
-        @unknown default: .gray
         }
     }
 }
