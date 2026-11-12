@@ -5,17 +5,18 @@ A clean, lightweight menu bar monitor for Macs with Apple silicon.
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/panel-dark.png">
-    <img src="docs/panel-light.png" width="320" alt="The Cores dropdown: CPU load, CPU and GPU temperature, per-core bars, memory use with the GPU's share, one-minute history, and SSD, battery and fan readings">
+    <img src="docs/panel-light.png" width="600" alt="The Cores dropdown: cards for the CPU, GPU, memory, disk, battery and fans, each with a one-minute chart, and a bar for every core">
   </picture>
 </p>
 
-Cores shows your CPU load and temperature in the menu bar. In Settings → Menu bar you can show just one of them to save room, or add your battery's charge on a laptop. Click it to see:
+Cores shows your CPU load and temperature in the menu bar. In Settings → Menu bar you can show just one of them to save room, or add your battery's charge on a laptop. Click it for a card for each part of your Mac, each with a chart of the last minute:
 
-- **Every core at a glance**, grouped by core type
-- **CPU and GPU temperature**, with the last minute of history
-- **Memory**: how much of your unified memory is in use, and the GPU's share of it
-- **Battery** (laptops): charge, whether it's plugged in and charging, time left, and cycle count
-- **SSD and battery temperature** and **fan speeds**
+- **CPU**: load, each core type, and temperature, plus **every core at a glance**
+- **GPU**: how busy it is, how much memory it's using, and temperature
+- **Memory**: how much of your unified memory is in use, broken down like Activity Monitor, and memory pressure
+- **Disk**: free space, read and write speed, and SSD temperature
+- **Battery** (laptops): charge, whether it's plugged in and charging, power draw, cycle count and temperature
+- **Fans**: the speed of each fan
 
 It uses almost no CPU itself and keeps itself up to date.
 

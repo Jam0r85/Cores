@@ -24,22 +24,32 @@ enum Tools {
         for fan in s.fans {
             print("  Fan \(fan.id + 1): \(Int(fan.rpm)) rpm" + (fan.maxRPM.map { " (max \(Int($0)))" } ?? ""))
         }
-        if let memory = monitor.panel.memory {
-            print("  Memory: \(MemoryView.gigabytes(memory.used)) of \(MemoryView.wholeGigabytes(memory.total)) used")
-            if let gpu = memory.gpu {
-                print("  GPU share: \(MemoryView.gigabytes(gpu.inUse)) in use, \(MemoryView.gigabytes(gpu.allocated)) allocated, max \(gpu.limit.map(MemoryView.gigabytes) ?? "?")")
-            }
+        let panel = monitor.panel
+        if let memory = panel.memory {
+            print("  Memory: \(Format.gigabytes(memory.used)) of \(Format.wholeGigabytes(memory.total)) used (app \(Format.gigabytes(memory.app)), wired \(Format.gigabytes(memory.wired)), compressed \(Format.gigabytes(memory.compressed))), pressure \(memory.pressure.map { "\($0)" } ?? "?")")
         }
-        if let battery = monitor.panel.battery {
-            print("  Battery charge: \(battery.charge)%, \(BatteryView.status(battery))" + (battery.cycles.map { ", \($0) cycles" } ?? ""))
+        if let gpu = panel.gpu {
+            print("  GPU: \(gpu.utilization.map { Format.percent($0) + "%" } ?? "?") busy, \(Format.gigabytes(gpu.memoryInUse)) in use, \(Format.gigabytes(gpu.memoryAllocated)) allocated, max \(monitor.gpuMemoryLimit.map(Format.gigabytes) ?? "?")")
+        }
+        if let disk = panel.disk {
+            print("  Disk: \(disk.free.map { Format.diskSize($0).joined(separator: " ") } ?? "?") free of \(disk.total.map { Format.diskSize($0).joined(separator: " ") } ?? "?"), reading \(Format.rate(disk.readRate)), writing \(Format.rate(disk.writeRate))")
+        }
+        if let battery = panel.battery {
+            print("  Battery charge: \(battery.charge)%, \(Format.batteryStatus(battery))" + (battery.cycles.map { ", \($0) cycles" } ?? "")
+                  + (battery.power.map { String(format: ", %.1f W", $0) } ?? ""))
         }
         print("  Thermal state: \(ProcessInfo.processInfo.thermalState.rawValue)")
 
         let sensors = SensorSampler()
         let cpu = CPUSampler()
         let battery = BatterySampler()
+        let gpu = GPUSampler()
+        let memory = MemorySampler()
+        let disk = DiskSampler()
         _ = cpu.sample()
+        _ = disk.sample()
         print("  Timing: CPU \(clock.measure { _ = cpu.sample() }), CPU+GPU temps \(clock.measure { _ = sensors.sampleTemps() }), fans \(clock.measure { _ = sensors.sampleFans() }), HID \(clock.measure { _ = sensors.sampleHID() }), battery \(clock.measure { _ = battery.sample() })")
+        print("  Timing: GPU \(clock.measure { _ = gpu.sample() }), memory \(clock.measure { _ = memory.sample() }), disk \(clock.measure { _ = disk.sample() })")
     }
 
     // MARK: - Self-test

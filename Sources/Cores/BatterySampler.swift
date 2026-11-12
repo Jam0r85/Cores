@@ -16,6 +16,8 @@ struct BatteryReading: Sendable, Equatable {
     /// Until empty on battery, or until full while charging. Nil while macOS is still estimating.
     var minutesRemaining: Int?
     var cycles: Int?
+    /// Watts flowing out of the battery (on battery) or into it (charging). Nil when it's idle.
+    var power: Double?
 }
 
 /// Reads the battery through the public power source API, plus the cycle count from the
@@ -50,13 +52,22 @@ final class BatterySampler {
         return BatteryReading(charge: maximum > 0 ? min(100, Int((Double(current) / Double(maximum) * 100).rounded())) : current,
                               state: state,
                               minutesRemaining: minutes.flatMap { $0 > 0 ? $0 : nil }, // -1 while estimating
-                              cycles: cycleCount())
+                              cycles: property("CycleCount").map { Int($0) },
+                              power: power())
     }
 
-    private func cycleCount() -> Int? {
+    /// Current (mA, negative while discharging) times voltage (mV).
+    private func power() -> Double? {
+        guard let amperage = property("Amperage"), let voltage = property("Voltage") else { return nil }
+        let watts = abs(Double(amperage) * Double(voltage)) / 1_000_000
+        return watts >= 0.05 ? watts : nil
+    }
+
+    /// Signed even when the registry stores a negative number as a huge unsigned one.
+    private func property(_ key: String) -> Int64? {
         guard service != 0 else { return nil }
-        return IORegistryEntryCreateCFProperty(service, "CycleCount" as CFString, kCFAllocatorDefault, 0)?
-            .takeRetainedValue() as? Int
+        return (IORegistryEntryCreateCFProperty(service, key as CFString, kCFAllocatorDefault, 0)?
+            .takeRetainedValue() as? NSNumber)?.int64Value
     }
 
     private static func internalBattery() -> [String: Any]? {

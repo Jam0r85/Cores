@@ -1,18 +1,22 @@
 import Darwin
 import Foundation
 
-/// The Mac's unified memory: how much is in use overall, and the GPU's share of it.
+/// The Mac's unified memory, broken down the way Activity Monitor does it.
 struct MemoryReading: Sendable, Equatable {
-    var used: UInt64   // bytes, counted the way Activity Monitor's "Memory Used" is
-    var total: UInt64  // physical memory
-    var gpu: GPUMemoryReading?
+    enum Pressure: Sendable, Equatable { case normal, warning, critical }
+
+    var used: UInt64       // app + wired + compressed: Activity Monitor's "Memory Used"
+    var total: UInt64      // physical memory
+    var app: UInt64
+    var wired: UInt64
+    var compressed: UInt64
+    var pressure: Pressure?
 }
 
 final class MemorySampler {
     private let host = mach_host_self()
     private let total = ProcessInfo.processInfo.physicalMemory
     private let pageSize: UInt64
-    private let gpu = GPUMemorySampler()
 
     init() {
         var size: vm_size_t = 0
@@ -31,8 +35,17 @@ final class MemorySampler {
         }
         guard result == KERN_SUCCESS else { return nil }
         let anonymous = UInt64(stats.internal_page_count)
-        let appPages = anonymous - min(UInt64(stats.purgeable_count), anonymous)
-        let usedPages = appPages + UInt64(stats.wire_count) + UInt64(stats.compressor_page_count)
-        return MemoryReading(used: min(usedPages * pageSize, total), total: total, gpu: gpu.sample())
+        let app = (anonymous - min(UInt64(stats.purgeable_count), anonymous)) * pageSize
+        let wired = UInt64(stats.wire_count) * pageSize
+        let compressed = UInt64(stats.compressor_page_count) * pageSize
+        // The same level macOS uses to decide when to start compressing and swapping.
+        let pressure: MemoryReading.Pressure? = switch Sysctl.int("kern.memorystatus_vm_pressure_level") {
+        case 1: .normal
+        case 2: .warning
+        case 4: .critical
+        default: nil
+        }
+        return MemoryReading(used: min(app + wired + compressed, total), total: total,
+                             app: app, wired: wired, compressed: compressed, pressure: pressure)
     }
 }

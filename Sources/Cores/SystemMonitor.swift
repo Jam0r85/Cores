@@ -4,13 +4,14 @@ import notify
 import Observation
 import os
 
-/// Samples the CPU and sensors and keeps a minute of history for the charts.
+/// Samples the hardware and keeps a minute of history for each card's chart.
 ///
 /// While the panel is open it samples every second and reads everything. While it's closed
 /// only the menu bar readout is visible, so it samples every 3 seconds at background priority,
-/// skips the readings only the panel shows (fans, memory, SSD, battery), and doesn't touch the
-/// panel's views at all. The menu bar is only redrawn when what it shows actually changes.
-/// The battery's charge isn't polled at all while closed: macOS says when it changes.
+/// skips the slow readings only the panel shows (SSD and battery temperatures), and doesn't touch
+/// the panel's views at all. The quick ones (memory, GPU, disk, fans) are still read so the charts
+/// already cover the last minute when the panel opens. The menu bar is only redrawn when what it
+/// shows actually changes. The battery isn't polled while closed: macOS says when it changes.
 @MainActor @Observable
 final class SystemMonitor {
     struct ClusterLoad: Identifiable {
@@ -31,12 +32,19 @@ final class SystemMonitor {
     struct PanelData {
         var clusters: [ClusterLoad]
         var totalLoad: Double = 0
-        var loadHistory: [Sample] = []
         var sensors = SensorSnapshot()
-        var cpuTempHistory: [Sample] = []
-        var gpuTempHistory: [Sample] = []
+        var gpu: GPUReading?
         var memory: MemoryReading?
+        var disk: DiskReading?
         var battery: BatteryReading?
+
+        // The last minute of each card's main reading.
+        var loadHistory: [Sample] = []    // percent
+        var gpuHistory: [Sample] = []     // percent
+        var memoryHistory: [Sample] = []  // percent of physical memory in use
+        var diskHistory: [Sample] = []    // bytes per second, read + written
+        var batteryHistory: [Sample] = [] // percent charge
+        var fanHistory: [Sample] = []     // average rpm
     }
 
     /// Which readings the menu bar shows, chosen in Settings and saved between launches.
@@ -102,6 +110,8 @@ final class SystemMonitor {
 
     let chipName: String
     let coreCount: Int
+    let gpuCoreCount: Int?
+    let gpuMemoryLimit: UInt64?
     let hasBattery: Bool
     /// What the panel shows. Only updated while it's open (and the moment it opens).
     private(set) var panel: PanelData
@@ -126,6 +136,8 @@ final class SystemMonitor {
         autoTick = startTimer
         chipName = sampler.cpu.chipName
         coreCount = sampler.cpu.clusters.reduce(0) { $0 + $1.cpus.count }
+        gpuCoreCount = sampler.gpu.coreCount
+        gpuMemoryLimit = sampler.gpu.memoryLimit
         hasBattery = sampler.battery.hasBattery
         let empty = PanelData(clusters: sampler.cpu.clusters.map {
             ClusterLoad(id: $0.id, name: $0.name, firstCPU: $0.cpus.lowerBound,
@@ -249,11 +261,21 @@ final class SystemMonitor {
             data.sensors.battery = hid.battery
         }
         if data.sensors.cpu == nil { data.sensors.cpu = data.sensors.soc } // no SMC: fall back to the SoC die sensors
-        if let memory = reading.memory { data.memory = memory }
+        data.gpu = reading.gpuStats
+        data.memory = reading.memory
+        data.disk = reading.disk
         if let battery = reading.battery { data.battery = battery }
 
-        if let cpu = data.sensors.cpu { Self.append(cpu.average, at: reading.time, to: &data.cpuTempHistory) }
-        if let gpu = data.sensors.gpu { Self.append(gpu.average, at: reading.time, to: &data.gpuTempHistory) }
+        let time = reading.time
+        if let utilization = data.gpu?.utilization { Self.append(utilization * 100, at: time, to: &data.gpuHistory) }
+        if let memory = data.memory, memory.total > 0 {
+            Self.append(Double(memory.used) / Double(memory.total) * 100, at: time, to: &data.memoryHistory)
+        }
+        if let read = data.disk?.readRate, let write = data.disk?.writeRate { Self.append(read + write, at: time, to: &data.diskHistory) }
+        if let battery = data.battery { Self.append(Double(battery.charge), at: time, to: &data.batteryHistory) }
+        if !data.sensors.fans.isEmpty {
+            Self.append(data.sensors.fans.map(\.rpm).reduce(0, +) / Double(data.sensors.fans.count), at: time, to: &data.fanHistory)
+        }
         latest = data
 
         if panelVisible || !autoTick { panel = data } // the command-line tools always want it
@@ -278,27 +300,32 @@ private final class Sampler: @unchecked Sendable {
         var gpu: TempReading?
         var fans: [FanReading]?
         var hid: (soc: TempReading?, ssd: TempReading?, battery: TempReading?)?
+        var gpuStats: GPUReading?
         var memory: MemoryReading?
+        var disk: DiskReading?
         var battery: BatteryReading?
     }
 
     let queue = DispatchQueue(label: "Cores.sampler") // priority is set per read, see SystemMonitor.tick()
     let cpu = CPUSampler()
     let battery = BatterySampler()
+    let gpu = GPUSampler()
     private let sensors = SensorSampler()
     private let memory = MemorySampler()
+    private let disk = DiskSampler()
     private var lastHIDRead = Date.distantPast
     private var lastBatteryRead = Date.distantPast
 
-    /// `detail` adds the readings only the open panel shows.
+    /// `detail` adds the slower readings only the open panel shows.
     func read(detail: Bool) -> Reading {
         let now = Date()
         let temps = sensors.sampleTemps()
         var reading = Reading(time: now, loads: cpu.sample(), cpu: temps.cpu, gpu: temps.gpu)
-        if detail {
-            reading.fans = sensors.sampleFans()
-            reading.memory = memory.sample()
-        }
+        // Under a millisecond together, and they keep the panel's charts full while it's closed.
+        reading.fans = sensors.sampleFans()
+        reading.gpuStats = gpu.sample()
+        reading.memory = memory.sample()
+        reading.disk = disk.sample()
         // SSD and battery change slowly: every 5 s while open.
         // Without SMC CPU sensors they stand in for CPU temperature, so then they're read every time.
         if sensors.needsHIDEveryTick || (detail && now.timeIntervalSince(lastHIDRead) >= 5) {
