@@ -48,6 +48,7 @@ struct PanelView: View {
             StatsRow(monitor: monitor)
             CoreBarsView(clusters: monitor.panel.clusters, width: Self.width - Self.padding * 2)
             MemoryView(memory: monitor.panel.memory)
+            if monitor.hasBattery { BatteryView(battery: monitor.panel.battery) }
             HStack(spacing: 10) {
                 HistoryCard(title: "Load", series: [.init(name: "CPU", samples: monitor.panel.loadHistory, color: .accentColor)],
                             domain: 0...100, filled: true)
@@ -302,6 +303,69 @@ struct MemoryView: View {
 
     static func wholeGigabytes(_ bytes: UInt64) -> String {
         "\(Int((Double(bytes) / 1_073_741_824).rounded())) GB"
+    }
+}
+
+// MARK: - Battery
+
+/// Laptops only. Every line is always there, whatever the state, so the panel height stays put.
+struct BatteryView: View {
+    let battery: BatteryReading?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("BATTERY")
+                    .font(.system(size: 10, weight: .semibold))
+                    .kerning(0.6)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text(battery.map { "\($0.charge)%" } ?? "–")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 3, style: .continuous)
+                        .fill(.primary.opacity(0.07))
+                    let fraction = Double(battery?.charge ?? 0) / 100
+                    RoundedRectangle(cornerRadius: 3, style: .continuous)
+                        .fill(color.gradient)
+                        .frame(width: fraction > 0 ? max(4, geo.size.width * fraction) : 0)
+                }
+            }
+            .frame(height: 6)
+            HStack {
+                Text(battery.map(Self.status) ?? "–")
+                Spacer()
+                Text(battery?.cycles.map { $0 == 1 ? "1 cycle" : "\($0.formatted()) cycles" } ?? "")
+            }
+            .font(.system(size: 10))
+            .foregroundStyle(.tertiary)
+        }
+        .monospacedDigit()
+        .help("Not charging while plugged in usually means macOS is holding the charge to look after the battery "
+              + "(Optimized Battery Charging, or a charge limit in Battery settings). A cycle is a full charge's "
+              + "worth of use, whether in one go or spread over several charges.")
+    }
+
+    private var color: Color {
+        guard let battery, battery.state == .onBattery else { return .green }
+        return battery.charge <= 10 ? .red : battery.charge <= 20 ? .orange : .green
+    }
+
+    static func status(_ battery: BatteryReading) -> String {
+        let time = battery.minutesRemaining.map(duration)
+        return switch battery.state {
+        case .onBattery: ["On battery", time.map { "\($0) left" }].compactMap { $0 }.joined(separator: " · ")
+        case .charging: ["Charging", time.map { "\($0) until full" }].compactMap { $0 }.joined(separator: " · ")
+        case .charged: "Plugged in · fully charged"
+        case .notCharging: "Plugged in · not charging"
+        }
+    }
+
+    private static func duration(_ minutes: Int) -> String {
+        minutes < 60 ? "\(minutes) min" : "\(minutes / 60) h \(minutes % 60) min"
     }
 }
 

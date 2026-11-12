@@ -9,11 +9,12 @@ A clean, lightweight menu bar monitor for Macs with Apple silicon.
   </picture>
 </p>
 
-Cores shows your CPU load and temperature in the menu bar, or just one of them if you'd rather it took up less room (Settings → Menu bar). Click it to see:
+Cores shows your CPU load and temperature in the menu bar. In Settings → Menu bar you can show just one of them to save room, or add your battery's charge on a laptop. Click it to see:
 
 - **Every core at a glance**, grouped by core type
 - **CPU and GPU temperature**, with the last minute of history
 - **Memory**: how much of your unified memory is in use, and the GPU's share of it
+- **Battery** (laptops): charge, whether it's plugged in and charging, time left, and cycle count
 - **SSD and battery temperature** and **fan speeds**
 
 It uses almost no CPU itself and keeps itself up to date.

@@ -30,12 +30,16 @@ enum Tools {
                 print("  GPU share: \(MemoryView.gigabytes(gpu.inUse)) in use, \(MemoryView.gigabytes(gpu.allocated)) allocated, max \(gpu.limit.map(MemoryView.gigabytes) ?? "?")")
             }
         }
+        if let battery = monitor.panel.battery {
+            print("  Battery charge: \(battery.charge)%, \(BatteryView.status(battery))" + (battery.cycles.map { ", \($0) cycles" } ?? ""))
+        }
         print("  Thermal state: \(ProcessInfo.processInfo.thermalState.rawValue)")
 
         let sensors = SensorSampler()
         let cpu = CPUSampler()
+        let battery = BatterySampler()
         _ = cpu.sample()
-        print("  Timing: CPU \(clock.measure { _ = cpu.sample() }), CPU+GPU temps \(clock.measure { _ = sensors.sampleTemps() }), fans \(clock.measure { _ = sensors.sampleFans() }), HID \(clock.measure { _ = sensors.sampleHID() })")
+        print("  Timing: CPU \(clock.measure { _ = cpu.sample() }), CPU+GPU temps \(clock.measure { _ = sensors.sampleTemps() }), fans \(clock.measure { _ = sensors.sampleFans() }), HID \(clock.measure { _ = sensors.sampleHID() }), battery \(clock.measure { _ = battery.sample() })")
     }
 
     // MARK: - Self-test
@@ -130,20 +134,35 @@ enum Tools {
                 write(panel, scale: 2, to: url.appendingPathComponent("\(settings ? "settings" : "panel")-\(name).png"))
             }
         }
-        let variants: [(String, SystemMonitor.MenuBarItems)] = [
+        var variants: [(String, SystemMonitor.MenuBarItems)] = [
             ("menubar", .init()),
             ("menubar-usage", .init(usage: true, temperature: false)),
             ("menubar-temp", .init(usage: false, temperature: true)),
         ]
+        if monitor.hasBattery {
+            variants += [("menubar-battery", .init(usage: false, temperature: false, battery: true)),
+                         ("menubar-all", .init(usage: true, temperature: true, battery: true))]
+        }
         for (name, items) in variants {
             let state = SystemMonitor.MenuBarState(monitor.panel, items: items)
             // And at the widest it gets, to check nothing is cut off.
-            let widest = MenuBarReadout(tiers: state.tierFractions.map { _ in 1 }, load: 100, temp: 100,
-                                        showsUsage: items.usage, showsTemp: items.temperature)
-            for (suffix, readout) in [("", MenuBarReadout(state)), ("-widest", widest)] {
-                write(readout.padding(4).background(Color.white), scale: 4, to: url.appendingPathComponent("\(name)\(suffix).png"))
+            var widest = state
+            widest.tierLevels = state.tierLevels.map { _ in SystemMonitor.MenuBarState.barSteps }
+            widest.load = 100
+            widest.temp = items.temperature ? 100 : nil
+            widest.batteryCharge = items.battery ? 100 : nil
+            for (suffix, readout) in [("", state), ("-widest", widest)] {
+                write(MenuBarReadout(readout).padding(4).background(Color.white), scale: 4,
+                      to: url.appendingPathComponent("\(name)\(suffix).png"))
             }
         }
+        // Every battery icon, whatever this Mac is doing right now.
+        let icons: [(Int, BatteryReading.State)] = [(100, .charged), (80, .notCharging), (45, .charging), (12, .charging), (8, .onBattery)]
+        let iconRow = HStack(spacing: 10) {
+            ForEach(Array(icons.enumerated()), id: \.offset) { _, icon in MenuBarBatteryIcon(charge: icon.0, state: icon.1) }
+        }
+        write(iconRow.foregroundStyle(.black).padding(4).background(Color.white), scale: 4,
+              to: url.appendingPathComponent("menubar-battery-icons.png"))
         print("Wrote snapshots to \(url.path)")
     }
 

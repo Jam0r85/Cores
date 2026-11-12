@@ -1,4 +1,6 @@
 import Foundation
+import IOKit.ps
+import notify
 import Observation
 import os
 
@@ -8,6 +10,7 @@ import os
 /// only the menu bar readout is visible, so it samples every 3 seconds at background priority,
 /// skips the readings only the panel shows (fans, memory, SSD, battery), and doesn't touch the
 /// panel's views at all. The menu bar is only redrawn when what it shows actually changes.
+/// The battery's charge isn't polled at all while closed: macOS says when it changes.
 @MainActor @Observable
 final class SystemMonitor {
     struct ClusterLoad: Identifiable {
@@ -33,6 +36,7 @@ final class SystemMonitor {
         var cpuTempHistory: [Sample] = []
         var gpuTempHistory: [Sample] = []
         var memory: MemoryReading?
+        var battery: BatteryReading?
     }
 
     /// Which readings the menu bar shows, chosen in Settings and saved between launches.
@@ -40,22 +44,29 @@ final class SystemMonitor {
     struct MenuBarItems: Equatable {
         var usage = true       // the core bars and total load
         var temperature = true // CPU temperature
+        var battery = false    // charge and whether it's charging; laptops only
 
-        var isValid: Bool { usage || temperature }
+        var count: Int { [usage, temperature, battery].filter { $0 }.count }
+        var isValid: Bool { count > 0 }
 
         private static let usageKey = "menuBarShowsUsage"
         private static let temperatureKey = "menuBarShowsTemperature"
+        private static let batteryKey = "menuBarShowsBattery"
 
-        static func load() -> MenuBarItems {
+        /// Battery is left off on a Mac without one (say, settings carried over from a laptop).
+        static func load(hasBattery: Bool) -> MenuBarItems {
             let defaults = UserDefaults.standard
-            defaults.register(defaults: [usageKey: true, temperatureKey: true])
-            let items = MenuBarItems(usage: defaults.bool(forKey: usageKey), temperature: defaults.bool(forKey: temperatureKey))
+            defaults.register(defaults: [usageKey: true, temperatureKey: true, batteryKey: false])
+            let items = MenuBarItems(usage: defaults.bool(forKey: usageKey),
+                                     temperature: defaults.bool(forKey: temperatureKey),
+                                     battery: hasBattery && defaults.bool(forKey: batteryKey))
             return items.isValid ? items : MenuBarItems()
         }
 
         func save() {
             UserDefaults.standard.set(usage, forKey: Self.usageKey)
             UserDefaults.standard.set(temperature, forKey: Self.temperatureKey)
+            UserDefaults.standard.set(battery, forKey: Self.batteryKey)
         }
     }
 
@@ -70,12 +81,16 @@ final class SystemMonitor {
         var tierLevels: [Int]
         var load: Int
         var temp: Int?
+        var batteryCharge: Int?
+        var batteryState: BatteryReading.State?
 
         init(_ data: PanelData, items: MenuBarItems) {
             self.items = items
             tierLevels = items.usage && items.temperature ? data.clusters.map { Int(($0.average * Double(Self.barSteps)).rounded()) } : []
             load = items.usage ? Int((data.totalLoad * 100).rounded()) : 0
             temp = items.temperature ? data.sensors.cpu.map { Int($0.average.rounded()) } : nil
+            batteryCharge = items.battery ? data.battery?.charge : nil
+            batteryState = items.battery ? data.battery?.state : nil
         }
 
         var tierFractions: [Double] { tierLevels.map { Double($0) / Double(Self.barSteps) } }
@@ -87,6 +102,7 @@ final class SystemMonitor {
 
     let chipName: String
     let coreCount: Int
+    let hasBattery: Bool
     /// What the panel shows. Only updated while it's open (and the moment it opens).
     private(set) var panel: PanelData
     /// What the menu bar shows. Only updated when the drawing would change.
@@ -110,18 +126,20 @@ final class SystemMonitor {
         autoTick = startTimer
         chipName = sampler.cpu.chipName
         coreCount = sampler.cpu.clusters.reduce(0) { $0 + $1.cpus.count }
+        hasBattery = sampler.battery.hasBattery
         let empty = PanelData(clusters: sampler.cpu.clusters.map {
             ClusterLoad(id: $0.id, name: $0.name, firstCPU: $0.cpus.lowerBound,
                         cores: Array(repeating: 0, count: $0.cpus.count))
         })
         latest = empty
         panel = empty
-        let items = MenuBarItems.load()
+        let items = MenuBarItems.load(hasBattery: hasBattery)
         menuBarItems = items
         menuBar = MenuBarState(empty, items: items)
         tickNow()      // full read up front so the panel's first open isn't missing anything
         panel = latest // and give the panel its full layout before it's ever shown, so it never changes height
         scheduleTimer()
+        if startTimer && hasBattery { watchBattery() }
         if startTimer { log.notice("Started, sampling every \(Int(Self.closedInterval))s until the panel opens") }
     }
 
@@ -150,6 +168,32 @@ final class SystemMonitor {
     private func updateMenuBar() {
         let menuBar = MenuBarState(latest, items: menuBarItems)
         if menuBar != self.menuBar { self.menuBar = menuBar }
+    }
+
+    /// macOS posts a notification whenever the battery's charge, time remaining or power source
+    /// changes, so plugging in shows up straight away without polling the battery.
+    private func watchBattery() {
+        var token: Int32 = 0
+        notify_register_dispatch(kIOPSNotifyPowerSource, &token, .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.readBattery() }
+        }
+    }
+
+    private func readBattery() {
+        let sampler = sampler
+        sampler.queue.async(qos: .utility) { [weak self] in
+            let battery = sampler.battery.sample()
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated { self?.applyBattery(battery) }
+            }
+        }
+    }
+
+    private func applyBattery(_ battery: BatteryReading?) {
+        guard let battery else { return }
+        latest.battery = battery
+        if panelVisible { panel.battery = battery }
+        updateMenuBar()
     }
 
     private func scheduleTimer() {
@@ -206,6 +250,7 @@ final class SystemMonitor {
         }
         if data.sensors.cpu == nil { data.sensors.cpu = data.sensors.soc } // no SMC: fall back to the SoC die sensors
         if let memory = reading.memory { data.memory = memory }
+        if let battery = reading.battery { data.battery = battery }
 
         if let cpu = data.sensors.cpu { Self.append(cpu.average, at: reading.time, to: &data.cpuTempHistory) }
         if let gpu = data.sensors.gpu { Self.append(gpu.average, at: reading.time, to: &data.gpuTempHistory) }
@@ -234,13 +279,16 @@ private final class Sampler: @unchecked Sendable {
         var fans: [FanReading]?
         var hid: (soc: TempReading?, ssd: TempReading?, battery: TempReading?)?
         var memory: MemoryReading?
+        var battery: BatteryReading?
     }
 
     let queue = DispatchQueue(label: "Cores.sampler") // priority is set per read, see SystemMonitor.tick()
     let cpu = CPUSampler()
+    let battery = BatterySampler()
     private let sensors = SensorSampler()
     private let memory = MemorySampler()
     private var lastHIDRead = Date.distantPast
+    private var lastBatteryRead = Date.distantPast
 
     /// `detail` adds the readings only the open panel shows.
     func read(detail: Bool) -> Reading {
@@ -256,6 +304,12 @@ private final class Sampler: @unchecked Sendable {
         if sensors.needsHIDEveryTick || (detail && now.timeIntervalSince(lastHIDRead) >= 5) {
             reading.hid = sensors.sampleHID()
             lastHIDRead = now
+        }
+        // While closed the battery is read only when macOS says it changed (SystemMonitor.watchBattery);
+        // while open it's also read every 5 s as a fallback.
+        if detail && battery.hasBattery && now.timeIntervalSince(lastBatteryRead) >= 5 {
+            reading.battery = battery.sample()
+            lastBatteryRead = now
         }
         return reading
     }

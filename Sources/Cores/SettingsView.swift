@@ -28,11 +28,15 @@ struct SettingsView: View {
 
             SettingsSection("Menu bar") {
                 // The last one left on can't be turned off, or Cores would vanish from the menu bar.
-                let items = monitor.menuBarItems
+                let lastOne = monitor.menuBarItems.count == 1
                 SwitchRow(title: "Core usage", isOn: menuBarItem(\.usage))
-                    .disabled(items.usage && !items.temperature)
+                    .disabled(lastOne && monitor.menuBarItems.usage)
                 SwitchRow(title: "CPU temperature", isOn: menuBarItem(\.temperature))
-                    .disabled(items.temperature && !items.usage)
+                    .disabled(lastOne && monitor.menuBarItems.temperature)
+                if monitor.hasBattery {
+                    SwitchRow(title: "Battery", isOn: menuBarItem(\.battery))
+                        .disabled(lastOne && monitor.menuBarItems.battery)
+                }
             }
 
             SettingsSection("Updates") {
