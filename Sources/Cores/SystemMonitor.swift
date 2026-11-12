@@ -284,9 +284,11 @@ final class SystemMonitor {
 
     private static func append(_ value: Double, at time: Date, to history: inout [Sample]) {
         history.append(Sample(time: time, value: value))
-        let cutoff = time.addingTimeInterval(-historySeconds - 1)
-        if let firstKept = history.firstIndex(where: { $0.time >= cutoff }), firstKept > 0 {
-            history.removeFirst(firstKept)
+        // The last minute plus the one reading before it, so the chart always knows the reading
+        // in effect at its left edge, however far apart the samples are.
+        let cutoff = time.addingTimeInterval(-historySeconds)
+        if let firstInWindow = history.firstIndex(where: { $0.time >= cutoff }), firstInWindow > 1 {
+            history.removeFirst(firstInWindow - 1)
         }
     }
 }

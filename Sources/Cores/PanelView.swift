@@ -175,7 +175,8 @@ private struct GPUCard: View {
     let memoryLimit: UInt64?
 
     var body: some View {
-        let peak = data.gpuHistory.map(\.value).max()
+        let since = (data.gpuHistory.last?.time ?? .now).addingTimeInterval(-SystemMonitor.historySeconds)
+        let peak = data.gpuHistory.filter { $0.time >= since }.map(\.value).max()
         MetricCard(title: "GPU", symbol: "square.stack.3d.up", tint: .pink,
                    caption: coreCount.map { "\($0)-core GPU" } ?? "Load now",
                    value: data.gpu?.utilization.map(Format.percent) ?? "–", unit: "%",
@@ -434,7 +435,7 @@ private struct CardBackground: View {
 }
 
 /// The last minute as bars, one per 1.5 s. Samples come every second while the panel is open and
-/// every 3 s while it's closed, so each bar shows the newest sample in its slot, or the one before.
+/// every 3 s while it's closed, so each bar shows the newest sample in its slot.
 private struct HistoryBars: View {
     let samples: [SystemMonitor.Sample]
     let tint: Color
@@ -464,16 +465,25 @@ private struct HistoryBars: View {
         .accessibilityHidden(true)
     }
 
+    /// Slots sit on a fixed grid in time, so the bars step left a whole slot at a time rather than
+    /// reshuffling whenever a sample lands, and the newest sample is always in the last slot.
+    /// A slot with no sample of its own repeats the reading before it, including one from just
+    /// before the window, so the leftmost bar doesn't drop out.
     static func slotValues(_ samples: [SystemMonitor.Sample]) -> [Double?] {
         var values = [Double?](repeating: nil, count: slots)
-        guard let end = samples.last?.time else { return values }
+        guard let newest = samples.last?.time else { return values }
         let slot = SystemMonitor.historySeconds / Double(slots)
-        let start = end.addingTimeInterval(-SystemMonitor.historySeconds)
+        func gridIndex(_ time: Date) -> Int { Int((time.timeIntervalSinceReferenceDate / slot).rounded(.down)) }
+        let first = gridIndex(newest) - (slots - 1)
+        var last: Double? // the reading in effect as the window starts
         for sample in samples {
-            let index = min(Int(sample.time.timeIntervalSince(start) / slot), slots - 1)
-            if index >= 0 { values[index] = sample.value }
+            let index = gridIndex(sample.time) - first
+            if index < 0 {
+                last = sample.value
+            } else if index < slots {
+                values[index] = sample.value
+            }
         }
-        var last: Double?
         for index in values.indices {
             if let value = values[index] { last = value } else { values[index] = last }
         }
