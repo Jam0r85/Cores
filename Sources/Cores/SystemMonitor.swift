@@ -184,9 +184,14 @@ final class SystemMonitor {
 
     /// macOS posts a notification whenever the battery's charge, time remaining or power source
     /// changes, so plugging in shows up straight away without polling the battery.
+    ///
+    /// It has to be the "any change" key: `kIOPSNotifyPowerSource` only fires when the Mac
+    /// switches between battery and the charger, so the menu bar's charge went stale until
+    /// the panel was opened. Apple warns this key fires more often than the others, but next to
+    /// the 3-second sampling timer one cheap battery read per change costs nothing.
     private func watchBattery() {
         var token: Int32 = 0
-        notify_register_dispatch(kIOPSNotifyPowerSource, &token, .main) { [weak self] _ in
+        notify_register_dispatch(kIOPSNotifyAnyPowerSource, &token, .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.readBattery() }
         }
     }
